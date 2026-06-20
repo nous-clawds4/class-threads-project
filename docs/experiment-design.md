@@ -138,6 +138,7 @@ removals and identical repair edges (asserted).
 | Pluggable per-proposal confidence (EdgeProposal) | `src/process2_thread_enforce.py` | ✅ |
 | Corroboration confidence + per-type baseline | `src/experiment/confidence.py` | ✅ |
 | Synthetic DAG w/ tunable redundancy | `src/graph_utils.py` (`build_synthetic_dag`) | ✅ |
+| Closure-aware (semantic) precision | `src/experiment/metrics_ext.py` | ✅ |
 | Stats (bootstrap CIs, Wilcoxon) | `src/experiment/stats.py` | ⬜ todo |
 
 ## 11. Findings so far (2026-06-20)
@@ -186,17 +187,19 @@ What this buys, stated precisely:
   to recall 0 at θ>0.9). Corroboration **reproduces** that point and then traces a
   graded Pareto frontier of higher-precision/lower-recall operating points the
   baseline structurally cannot reach — on the dense synthetic DAG, precision
-  0.30→0.63→0.97→1.00 as recall falls 0.62→0.16→0.05→0.01; on Wikidata
-  0.27→1.00 as recall falls 0.23→0.01. Do **not** describe this as "beats the
-  baseline at matched recall" (false); it is a frontier the baseline lacks.
-- **The advantage is a measurable, ~linear function of graph redundancy.** Average
+  0.32→0.67→0.94 as recall falls 0.64→0.17→0.06; on Wikidata 0.31→0.86→1.00 as
+  recall falls 0.22→0.01→0.003. Do **not** describe this as "beats the baseline at
+  matched recall" (false); it is a frontier the baseline lacks.
+- **The advantage is a measurable, monotone function of graph redundancy.** Average
   precision (interpolated; area under the best-precision-at-recall≥r frontier)
   advantage over per-type is **+0.000 on three independent tree datasets**
-  (synthetic, WordNet, `sdag mi=0`), rising monotonically to **+0.07** at
-  redundancy 0.23; the real `wikidata:Q42889:3` slice (redundancy 0.036) sits on
+  (synthetic, WordNet, `sdag mi=0`), rising monotonically to **+0.076** at
+  redundancy 0.28; the real `wikidata:Q42889:3` slice (redundancy 0.036) sits on
   that trend at **+0.006**. Redundancy is a property of the *data*, so the knob's
   power is too — demonstrated by sweeping it. (An independent re-derivation
-  confirmed the monotone ordering and the no-leakage / not-rigged conclusions.)
+  confirmed the monotone ordering and the no-leakage / not-rigged conclusions.
+  These numbers are now exactly reproducible: a PYTHONHASHSEED-dependence in the
+  synthetic-DAG generator was found and fixed.)
 
 Honest caveats — this is a precision–**recall trade**, not a free lunch:
 
@@ -228,9 +231,15 @@ Honest caveats — this is a precision–**recall trade**, not a free lunch:
    `edge_precision`/`hallucination_rate` use exact `(u,v,relation)` identity vs
    `pristine_edges`; semantically-*true* transitive `supersetOf` shortcuts (where
    `C ⊑ P` holds in the pristine closure but the exact edge was never present) are
-   counted as hallucinations (on the tree, 14/14 corroborated "fabrications" were
-   true shortcuts). A closure-aware precision is *todo* and would only **improve**
-   corroboration's apparent precision.
+   counted as hallucinations. A **closure-aware precision is now implemented**
+   (`metrics_ext.closure_precision` / `build_semantic_oracle`; credits an added
+   edge if it asserts something true in the pristine taxonomic *closure*). As
+   predicted it **only improves** corroboration: the closure AP advantage is ≥ the
+   exact one at every redundancy (e.g. +0.083 vs +0.076 at redundancy 0.28; +0.034
+   vs +0.026 at 0.085), and it even surfaces a small (+0.002) true-shortcut effect
+   on the `sdag mi=0` "tree" that exact precision hides. The gap is modest (most
+   corroborated edges are genuinely exact-pristine), so exact precision remains the
+   conservative, hard-to-game headline; Fig 4 overlays both frontiers.
 6. **Not rigged (reported as evidence).** Rewiring hits redundant vs tree edges at
    the dataset base rate (sdag 0.326 base vs 0.317 rewired; Wikidata 0.036 vs
    0.038), so "corroborated" ≠ "un-rewired by construction"; the per-type baseline

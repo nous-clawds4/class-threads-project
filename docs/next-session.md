@@ -10,7 +10,7 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
   via an **integrity & repair** empirical study. Framing is **data-driven**:
   make the stronger dual-node claim only if the data supports it.
 - **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~7 commits
-  ahead of `main`. **53 tests pass** (`.venv/bin/python -m pytest -q`).
+  ahead of `main`. **59 tests pass** (`.venv/bin/python -m pytest -q`).
   Note: `python` is not on PATH; use `.venv/bin/python`.
 - **Datasets wired in:** `synthetic` (control), `wordnet:vehicle.n.01:2` (scale),
   `wikidata:Q42889:3` (credibility — real DAG, 162 concepts / 120 instances / 6
@@ -26,11 +26,11 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
 ## How to run
 
 ```bash
-python -m pytest -q                       # 44 tests
-python -m src.experiment.experiment       # Tier-A grid -> results/results.parquet
-python -m src.experiment.money            # money grid  -> results/money.parquet
-python -m src.experiment.figures          # fig1, fig5
-# money figures (fig2, fig3) are written by the money run itself
+.venv/bin/python -m pytest -q                 # 59 tests  (python is NOT on PATH)
+.venv/bin/python -m src.experiment.experiment # Tier-A grid -> results/results.parquet
+.venv/bin/python -m src.experiment.money      # money grid  -> results/money.parquet
+.venv/bin/python -m src.experiment.figures    # fig1, fig5
+# money figures (fig2, fig3, fig4, fig6) are written by the money run itself
 ```
 Wikidata loads from the committed cache (offline). To refresh:
 `build_wikidata_graph(..., refresh=True)` (one WDQS fetch; be polite).
@@ -42,7 +42,8 @@ Wikidata loads from the committed cache (offline). To refresh:
 | `util.py` | deterministic blake2b-seeded RNG (`make_rng`) |
 | `oracle.py` | `freeze_oracle` (frozen EXPECTED + PRISTINE_EDGES), `holdout_split` |
 | `corruption.py` | Tier-A arms (E-HX/E-SO/E-HE/E-MIX/N-REM, UNIF/TARG) + Tier-B (`guidance_rewire_rate`, distractors) |
-| `metrics_ext.py` | edge precision/recall, hallucination, coverage, recovery, pair false-positives |
+| `metrics_ext.py` | edge precision/recall, hallucination, coverage, recovery, pair false-positives, closure-aware (semantic) precision |
+| `confidence.py` | per-proposal repair confidence: `per_type_confidence` (baseline) + `corroboration_confidence` |
 | `ablation.py` | single-node comparator (homologous flat corruption + closure detection) |
 | `experiment.py` | Tier-A factor-grid runner + `build_dataset` dispatch |
 | `money.py` | autonomous-repair runner (rewire × θ) + fidelity/θ-gate figures |
@@ -69,10 +70,12 @@ tie-break). Confidence constants: `CONF_HAS_EXTENSION=1.0`, `CONF_SUPERSET=0.9`,
    uncontrolled operating point into a graded Pareto PR frontier — *frontier
    extension*, not a higher-precision win at matched recall (the modes tie at
    θ=0). Its average-precision advantage is **0 on three tree datasets** and rises
-   ~linearly with redundancy (to +0.07 at redundancy 0.23; Wikidata +0.006 on
+   monotonically with redundancy (to +0.076 at redundancy 0.28; Wikidata +0.006 on
    trend). It's a precision–**recall trade**, a soft prior (some fabrications
    survive), and useless/harmful on a tree. Adversarially verified (no leakage,
-   not rigged). Full writeup + 7 caveats in `docs/experiment-design.md` §11.
+   not rigged). A closure-aware (semantic) precision confirms the exact oracle only
+   *understates* corroboration. Full writeup + 7 caveats in
+   `docs/experiment-design.md` §11.
 
 ## Primary task — COMPLETE
 
@@ -84,10 +87,12 @@ wired into the money grid, and verified. See §11 of the design doc. Key code:
 (`fig4_pr_curve`, `fig6_redundancy_scaling`, `precision_advantage`).
 
 ### Recommended next steps (in priority order)
-1. **Closure-aware precision** (caveat 5): the exact-typed-edge oracle counts
-   semantically-true transitive `supersetOf` shortcuts as hallucinations; add a
-   precision metric that credits an edge if `C ⊑ P` holds in the pristine
-   *closure*. Would only improve corroboration's apparent precision.
+1. ~~**Closure-aware precision** (caveat 5)~~ **DONE this session**:
+   `metrics_ext.closure_precision` / `build_semantic_oracle` credit an added edge
+   if `C ⊑ P` holds in the pristine *closure*. Confirmed it only improves
+   corroboration (closure AP advantage ≥ exact at every redundancy); fig4 overlays
+   both frontiers. Also fixed a PYTHONHASHSEED-dependence in `build_synthetic_dag`
+   that made the sdag results non-reproducible.
 2. **Denser real DAG**: `wikidata:Q42889:3` redundancy is only 0.036 so the real
    effect is small. Fetch a higher-redundancy real slice (richer-multiple-
    inheritance root, or bump `max_classes`/`max_depth`) to land a real-data point
@@ -119,17 +124,17 @@ deps are already in `requirements.txt`.
 > `feat/integrity-repair-experiment`). Read `docs/next-session.md`,
 > `docs/experiment-design.md` (esp. §11 findings — read the corroboration
 > resolution + its 7 caveats), and `master-prompt.md`. The harness is in
-> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 53 passing) to
+> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 59 passing) to
 > confirm green. (`python` is not on PATH — use `.venv/bin/python`.)
 >
 > The **evidence-based per-proposal confidence is DONE** (corroboration scorer →
-> graded PR frontier scaling with graph redundancy; §11). Pick up the recommended
+> graded PR frontier scaling with graph redundancy; §11), including the
+> closure-aware precision metric and a determinism fix. Pick up the recommended
 > next steps in `docs/next-session.md` → "Primary task — COMPLETE": (1) a
-> **closure-aware precision** metric (caveat 5), (2) a **denser real Wikidata
-> slice** to strengthen the real-data point on fig6, (3) **stats** (bootstrap
-> CIs + paired Wilcoxon; `n_added`/CIs on low-recall money points), and/or the
-> **flat+SHACL / flat+SPARQL-property-path baselines** (`docs/experiment-design.md`
-> §8/§10).
+> **denser real Wikidata slice** to strengthen the real-data point on fig6, (2)
+> **stats** (bootstrap CIs + paired Wilcoxon; `n_added`/CIs on low-recall money
+> points), and/or the **flat+SHACL / flat+SPARQL-property-path baselines**
+> (`docs/experiment-design.md` §8/§10).
 >
 > Framing is data-driven — report honestly, including null/negative results.
 > Commit incrementally on this branch and keep `docs/experiment-design.md` §11

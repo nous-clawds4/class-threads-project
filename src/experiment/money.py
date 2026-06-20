@@ -114,6 +114,7 @@ def run_money_grid(datasets, thetas, rewire_rates, seeds, config) -> List[Dict[s
         orc = O.freeze_oracle(g0, config)
         exp = set(orc.expected)
         pe = orc.pristine_edges
+        sem = M.build_semantic_oracle(pe, exp, config)  # closure-aware (semantic) oracle
         redund = dataset_redundancy(g0, config)
         logger.info("Dataset %s: redundancy=%.3f, %d expected pairs", ds, redund, len(exp))
         for rewire in rewire_rates:
@@ -136,8 +137,10 @@ def run_money_grid(datasets, thetas, rewire_rates, seeds, config) -> List[Dict[s
                             rewire=rewire, theta=theta, seed=seed,
                             n_added=len(added),
                             edge_precision=_nn(M.edge_precision(added, pe)),
+                            edge_precision_closure=_nn(M.closure_precision(added, sem)),
                             edge_recall=_nn(M.edge_recall(added, removed, pe, surviving)),
                             hallucination=_nn(M.hallucination_rate(added, pe)),
+                            hallucination_closure=_nn(M.closure_hallucination_rate(added, sem)),
                             pair_recall=(len(v1 - v0) / broken0 if broken0 else float("nan")),
                             cov_after=len(v1) / len(exp),
                         ))
@@ -150,9 +153,11 @@ def run_money_grid(datasets, thetas, rewire_rates, seeds, config) -> List[Dict[s
 _TRAPZ = getattr(np, "trapezoid", None) or np.trapz  # NumPy 2.x renamed trapz
 
 
-def _pr_points(sub: pd.DataFrame):
-    """(recall, precision) points, one per θ, averaged over the slice's seeds/rewires."""
-    g = sub.groupby("theta").agg(r=("edge_recall", "mean"), p=("edge_precision", "mean"))
+def _pr_points(sub: pd.DataFrame, prec_col: str = "edge_precision"):
+    """(recall, precision) points, one per θ, averaged over the slice's seeds/rewires.
+    ``prec_col`` selects exact (``edge_precision``) or closure-aware
+    (``edge_precision_closure``) precision."""
+    g = sub.groupby("theta").agg(r=("edge_recall", "mean"), p=(prec_col, "mean"))
     g = g.dropna()
     pts = sorted(set(zip(g.r.round(4), g.p.round(4))))
     return np.array([x for x, _ in pts]), np.array([y for _, y in pts])
@@ -171,14 +176,16 @@ def average_precision(recall, precision) -> float:
     return float(_TRAPZ(env, grid))
 
 
-def precision_advantage(df: pd.DataFrame, ds: str) -> float:
+def precision_advantage(df: pd.DataFrame, ds: str,
+                        prec_col: str = "edge_precision") -> float:
     """Average-precision advantage of corroboration over per-type in the Tier-B
     (rewired) regime — i.e. how much the corroboration frontier extends beyond the
-    baseline's lone operating point. ~0 when the graph has no redundancy."""
+    baseline's lone operating point. ~0 when the graph has no redundancy.
+    ``prec_col`` picks exact or closure-aware precision."""
     def ap(mode):
         sub = df[(df.dataset == ds) & (df.confidence == mode)
                  & (df.rewire.isin(TIER_B_REWIRES))]
-        return average_precision(*_pr_points(sub))
+        return average_precision(*_pr_points(sub, prec_col))
     return ap("corroboration") - ap("per_type")
 
 
@@ -268,16 +275,20 @@ def fig4_pr_curve(df: pd.DataFrame, path: Path, datasets: List[str]) -> None:
     for c, ds in enumerate(datasets):
         ax = axes[0][c]
         redund = df[df.dataset == ds].redundancy.iloc[0]
-        # corroboration frontier (line + markers)
-        rc, pc = _pr_points(df[(df.dataset == ds) & (df.confidence == "corroboration")
-                               & (df.rewire.isin(TIER_B_REWIRES))])
-        front = _pareto_front(rc, pc)
+        corr = df[(df.dataset == ds) & (df.confidence == "corroboration")
+                  & (df.rewire.isin(TIER_B_REWIRES))]
+        # corroboration frontier, exact-edge precision (conservative headline)
+        front = _pareto_front(*_pr_points(corr, "edge_precision"))
         ax.plot([r for r, _ in front], [p for _, p in front], "-s", ms=5,
-                color="#1b7837", label="corroboration frontier", zorder=4)
-        # per-type: a single operating point (bold marker)
-        rp, pp = _pr_points(df[(df.dataset == ds) & (df.confidence == "per_type")
-                               & (df.rewire.isin(TIER_B_REWIRES))])
-        ptf = _pareto_front(rp, pp)
+                color="#1b7837", label="corroboration (exact precision)", zorder=4)
+        # corroboration frontier, closure-aware (semantic) precision — the honest
+        # ceiling; true transitive shortcuts the exact metric mislabels are credited
+        cfront = _pareto_front(*_pr_points(corr, "edge_precision_closure"))
+        ax.plot([r for r, _ in cfront], [p for _, p in cfront], "--^", ms=5,
+                color="#66bd63", label="corroboration (closure precision)", zorder=3)
+        # per-type: a single operating point (bold marker), exact precision
+        ptf = _pareto_front(*_pr_points(df[(df.dataset == ds) & (df.confidence == "per_type")
+                                           & (df.rewire.isin(TIER_B_REWIRES))], "edge_precision"))
         ax.scatter([r for r, _ in ptf], [p for _, p in ptf], marker="*", s=240,
                    color="#b30000", edgecolor="k", linewidth=0.5, zorder=6,
                    label="per-type (single point)")
@@ -352,13 +363,16 @@ def main() -> None:
     fig6_redundancy_scaling(df, figs / "fig6_redundancy_scaling.png")
     print(f"Wrote {len(df)} rows; figures fig2, fig3, fig4_pr_curve, fig6_redundancy_scaling")
 
-    # Honest quantitative summary: average-precision advantage per dataset.
+    # Honest quantitative summary: average-precision advantage per dataset, under
+    # exact (conservative) and closure-aware (semantic) precision.
     print("\nAverage-precision advantage (corroboration − per-type), Tier-B:")
+    print(f"  {'dataset':24s} {'redundancy':>10} {'AP_adv(exact)':>14} {'AP_adv(closure)':>16}")
     for ds in DATASETS:
         if ds in df.dataset.unique():
             redund = df[df.dataset == ds].redundancy.iloc[0]
-            adv = precision_advantage(df, ds)
-            print(f"  {ds:24s} redundancy={redund:.3f}  advantage={adv:+.3f}")
+            adv = precision_advantage(df, ds, "edge_precision")
+            advc = precision_advantage(df, ds, "edge_precision_closure")
+            print(f"  {ds:24s} {redund:>10.3f} {adv:>+14.3f} {advc:>+16.3f}")
 
 
 if __name__ == "__main__":

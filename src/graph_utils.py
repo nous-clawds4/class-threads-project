@@ -187,6 +187,91 @@ def build_synthetic_graph(
 
 
 # ===========================================================================
+# Synthetic DAG with a tunable redundancy (multiple-inheritance) rate
+# ===========================================================================
+def build_synthetic_dag(
+    levels: int = 4,
+    branching: int = 3,
+    mi_rate: float = 0.3,
+    instances_per_leaf: int = 2,
+    seed: int = 0,
+    config: Optional[Dict[str, Any]] = None,
+) -> nx.DiGraph:
+    """A layered synthetic flat graph with a *controllable* redundancy rate.
+
+    Concepts form ``levels`` layers; every concept in layer ``L-1`` spawns
+    ``branching`` children in layer ``L`` (a ``subClassOf`` child->parent tree).
+    Then, with probability ``mi_rate``, each concept also gets a **redundant skip
+    edge** straight to one of its proper ancestors two-or-more layers up. That
+    ancestor is now reachable from the concept by *more than one route* (directly,
+    and via the parent chain) — i.e. genuine multiple-inheritance redundancy.
+
+    This redundancy is exactly the structural signal the corroboration confidence
+    exploits, and ``mi_rate`` is the knob that controls how much of it exists:
+
+    * ``mi_rate = 0`` → a pure **tree** (every edge is a bridge; no alternative
+      route exists for any edge), the controlled *null* where corroboration
+      cannot help.
+    * ``mi_rate > 0`` → a DAG whose redundancy (hence the precision–recall power
+      of the confidence knob) rises with the rate.
+
+    Instances (``instanceOf``) attach to the deepest layer. Acyclic by
+    construction (edges only ever go to a strictly-higher layer).
+    """
+    import numpy as np
+
+    rels = get_relations(config)
+    rng = np.random.default_rng(seed)
+    g = nx.DiGraph()
+
+    layers: List[List[str]] = [["c0_0"]]
+    g.add_node("c0_0", kind=KIND_CONCEPT, label="c0_0")
+    counter = 0
+    for L in range(1, levels):
+        cur: List[str] = []
+        for parent in layers[-1]:
+            for _ in range(branching):
+                counter += 1
+                name = f"c{L}_{counter}"
+                g.add_node(name, kind=KIND_CONCEPT, label=name)
+                g.add_edge(name, parent, relation=rels["sub_class_of"])  # child -> parent
+                cur.append(name)
+        layers.append(cur)
+
+    # Redundant skip edges -> multiple inheritance with guaranteed alternative routes.
+    deep_levels = {n: L for L, nodes in enumerate(layers) for n in nodes}
+    for L in range(2, levels):
+        for c in layers[L]:
+            if rng.random() >= mi_rate:
+                continue
+            # proper ancestors at least two layers up (so the parent chain is a
+            # genuine *alternative* route to the new direct skip edge). NOTE:
+            # ``sorted`` is load-bearing — ``nx.descendants`` returns a set whose
+            # iteration order is hash-randomized, so indexing it with ``rng``
+            # without sorting would make the whole graph depend on PYTHONHASHSEED.
+            anc = sorted(a for a in nx.descendants(g, c)  # child->parent reach = ancestors
+                         if deep_levels.get(a, L) <= L - 2 and not g.has_edge(c, a))
+            if anc:
+                target = anc[int(rng.integers(len(anc)))]
+                g.add_edge(c, target, relation=rels["sub_class_of"])
+
+    inst_i = 0
+    for c in layers[-1]:
+        for _ in range(instances_per_leaf):
+            inst_i += 1
+            iid = f"i{inst_i}"
+            g.add_node(iid, kind=KIND_INSTANCE, label=iid)
+            g.add_edge(iid, c, relation=rels["instance_of"])
+
+    n_concepts = sum(1 for _, d in g.nodes(data=True) if d.get("kind") == KIND_CONCEPT)
+    n_skip = g.number_of_edges() - (n_concepts - 1) - inst_i  # extra subClassOf beyond the tree
+    logger.info("Built synthetic DAG levels=%d branching=%d mi_rate=%.2f: %d concepts, "
+                "%d instances, %d redundant skip edges.",
+                levels, branching, mi_rate, n_concepts, inst_i, n_skip)
+    return g
+
+
+# ===========================================================================
 # Optional real data: a small WordNet noun subset (used by the notebook)
 # ===========================================================================
 def build_wordnet_graph(

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
@@ -39,8 +39,13 @@ logger = logging.getLogger(__name__)
 # (instance, concept) ground-truth pair
 Pair = Tuple[str, str]
 
-# Per-edge confidence used by repair. The gate (config.process2.repair.
-# min_confidence, default 0.75) decides which of these are allowed.
+# Per-edge *type* confidence — the prior used by repair. The gate
+# (config.process2.repair.min_confidence, default 0.75) decides which are
+# allowed. These are constants per edge TYPE, so good and fabricated proposals of
+# the same type are indistinguishable; this is exactly why θ behaves as an on/off
+# switch rather than a graded precision–recall knob under the default scorer. A
+# pluggable ``confidence`` builder (see ``src/experiment/confidence.py``) can
+# instead score each proposal by its evidential support.
 CONF_HAS_EXTENSION = 1.0   # structurally implied: abstract:C <-> extension:C
 CONF_SUPERSET = 0.9        # taxonomy-attested by the subClassOf hierarchy
 CONF_HAS_ELEMENT = 0.55    # asserting a NEW membership — risky, off by default
@@ -81,6 +86,45 @@ class RepairResult:
 
     def summary(self) -> Dict[str, Any]:
         return {"edges_added": len(self.added), "edges_skipped": len(self.skipped)}
+
+
+@dataclass(frozen=True)
+class EdgeProposal:
+    """A single candidate repair edge plus the semantic roles a confidence
+    function needs to score it.
+
+    ``base_confidence`` is the per-edge-*type* prior (the default scorer simply
+    returns it). The role fields say what the edge would assert, so an
+    evidence-based scorer can judge *this* proposal rather than its type:
+
+    * ``supersetOf`` (``extension:P -> extension:C``) asserts ``C ⊑ P`` →
+      ``parent_concept=P`` (the superset), ``child_concept=C`` (the subset).
+    * ``hasExtension`` (``abstract:C -> extension:C``) → ``concept=C``.
+    * ``hasElement`` (``extension:L -> instance``) asserts membership →
+      ``leaf_concept=L``, ``instance=i``.
+    """
+
+    u: str
+    v: str
+    relation: str
+    base_confidence: float
+    reason: str
+    parent_concept: Optional[str] = None
+    child_concept: Optional[str] = None
+    concept: Optional[str] = None
+    leaf_concept: Optional[str] = None
+    instance: Optional[str] = None
+
+
+# A confidence function scores one proposal in [0, 1]; a builder specializes it
+# to a particular (damaged) graph so structural signals can be precomputed once.
+ConfidenceFn = Callable[[EdgeProposal], float]
+ConfidenceBuilder = Callable[[nx.DiGraph, Optional[Dict[str, Any]]], ConfidenceFn]
+
+
+def _per_type_scorer(graph: nx.DiGraph, config: Optional[Dict[str, Any]]) -> ConfidenceFn:
+    """Default builder: confidence is the per-edge-type prior (the on/off baseline)."""
+    return lambda proposal: proposal.base_confidence
 
 
 # ===========================================================================
@@ -270,6 +314,7 @@ def repair_threads(
     expected: Optional[Set[Pair]] = None,
     reference: Optional[nx.DiGraph] = None,
     report: Optional[ThreadReport] = None,
+    confidence: Optional[ConfidenceBuilder] = None,
 ) -> RepairResult:
     """Add the minimal missing edges to restore broken threads (in place).
 
@@ -278,6 +323,13 @@ def repair_threads(
       * Each proposal carries a confidence; only proposals at or above
         ``config.process2.repair.min_confidence`` are applied.
       * At most ``max_new_edges`` edges are added.
+
+    ``confidence`` is a builder ``(graph, config) -> (EdgeProposal -> float)``.
+    It is invoked once on the *damaged* ``graph`` (before any edge is added) so
+    structural signals can be precomputed, then scores every proposal. ``None``
+    falls back to the per-edge-type prior (the on/off baseline); see
+    ``src/experiment/confidence.py`` for an evidence-based corroboration scorer
+    that turns θ into a graded precision–recall knob.
     """
     rels = get_relations(config)
     rcfg = ((config or {}).get("process2", {}) or {}).get("repair", {}) or {}
@@ -325,17 +377,20 @@ def repair_threads(
     def abs_node(c: str) -> str:
         return abstract_id(c) if graph.has_node(abstract_id(c)) else c
 
-    # Collect deduped edge proposals: key -> (u, v, relation, confidence, reason).
-    proposals: Dict[Tuple[str, str, str], Tuple[str, str, str, float, str]] = {}
+    # Collect deduped edge proposals. The per-type base confidence and the
+    # semantic roles are a pure function of the (u, v, relation) key, so the
+    # first proposal for a key wins (dedup is order-independent).
+    proposals: Dict[Tuple[str, str, str], EdgeProposal] = {}
 
-    def propose(u: str, v: str, relation: str, conf: float, reason: str) -> None:
+    def propose(u: str, v: str, relation: str, conf: float, reason: str,
+                **roles: Optional[str]) -> None:
         if not (graph.has_node(u) and graph.has_node(v)):
             return  # never invent nodes; only edges between existing ones
         if graph.has_edge(u, v) and graph.edges[u, v].get("relation") == relation:
             return  # already present
         key = (u, v, relation)
-        if key not in proposals or conf > proposals[key][3]:
-            proposals[key] = (u, v, relation, conf, reason)
+        if key not in proposals:
+            proposals[key] = EdgeProposal(u, v, relation, conf, reason, **roles)
 
     for inst, concept in sorted(report.broken):
         leaves = leaf_concepts(inst)
@@ -353,23 +408,29 @@ def repair_threads(
             # (a) hasExtension at the head concept.
             propose(abs_node(concept), ext_node(concept), rel_has_ext,
                     CONF_HAS_EXTENSION,
-                    f"hasExtension structurally implied for '{concept}'")
+                    f"hasExtension structurally implied for '{concept}'",
+                    concept=concept)
             # (b) supersetOf for each parent->child step along the chain.
             for parent, child in zip(chain, chain[1:]):
                 propose(ext_node(parent), ext_node(child), rel_sup, CONF_SUPERSET,
-                        f"supersetOf attested by taxonomy: {parent} -> {child}")
+                        f"supersetOf attested by taxonomy: {parent} -> {child}",
+                        parent_concept=parent, child_concept=child)
             # (c) hasElement for the leaf membership (risky; usually gated out).
             propose(ext_node(leaf), inst, rel_he, CONF_HAS_ELEMENT,
-                    f"hasElement would assert NEW membership: {leaf} -> {inst}")
+                    f"hasElement would assert NEW membership: {leaf} -> {inst}",
+                    leaf_concept=leaf, instance=inst)
+
+    # Score every proposal once, against the damaged graph (no edge added yet).
+    score: ConfidenceFn = (confidence or _per_type_scorer)(graph, config)
+    scored = [(score(p), p) for p in proposals.values()]
 
     # Apply proposals: highest confidence first, honoring threshold and cap.
     # Secondary key (u, v, relation) makes capped/tied selection deterministic
     # and seed-order-independent (required for reproducible experiments).
-    for u, v, relation, conf, reason in sorted(
-        proposals.values(), key=lambda t: (-t[3], t[0], t[1], t[2])
-    ):
-        record = {"u": u, "v": v, "relation": relation,
-                  "confidence": conf, "reason": reason}
+    for conf, p in sorted(scored, key=lambda t: (-t[0], t[1].u, t[1].v, t[1].relation)):
+        record = {"u": p.u, "v": p.v, "relation": p.relation,
+                  "confidence": conf, "base_confidence": p.base_confidence,
+                  "reason": p.reason}
         if conf < min_conf:
             record["skip_reason"] = f"confidence {conf} < min_confidence {min_conf}"
             result.skipped.append(record)
@@ -378,10 +439,10 @@ def repair_threads(
             record["skip_reason"] = f"max_new_edges cap ({max_edges}) reached"
             result.skipped.append(record)
             continue
-        graph.add_edge(u, v, relation=relation, repaired=True)
+        graph.add_edge(p.u, p.v, relation=p.relation, repaired=True)
         result.added.append(record)
         logger.info("Repair +edge %s -[%s]-> %s (conf=%.2f): %s",
-                    u, relation, v, conf, reason)
+                    p.u, p.relation, p.v, conf, p.reason)
 
     logger.info("Repair: %s", result.summary())
     return result

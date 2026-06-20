@@ -30,10 +30,19 @@ DEFAULT_SEEDS = 20
 def build_dataset(name: str, config):
     """Return ``(flat, dual)`` for a dataset spec.
 
-    ``"synthetic"`` or ``"wordnet:<root>:<depth>"`` (e.g. ``wordnet:vehicle.n.01:2``).
+    Specs:
+      * ``"synthetic"`` — the fixed animal/vehicle control taxonomy.
+      * ``"sdag:<levels>:<branching>:<mi_rate>:<seed>"`` — synthetic DAG with a
+        controllable multiple-inheritance/redundancy rate (e.g. ``sdag:4:3:0.3:0``).
+      * ``"wordnet:<root>:<depth>"`` (e.g. ``wordnet:vehicle.n.01:2``).
+      * ``"wikidata:<qid>:<depth>"`` (e.g. ``wikidata:Q42889:3``).
     """
     if name == "synthetic":
         flat = gu.build_synthetic_graph(config=config)
+    elif name.startswith("sdag:"):
+        _, levels, branching, mi_rate, seed = name.split(":")
+        flat = gu.build_synthetic_dag(levels=int(levels), branching=int(branching),
+                                      mi_rate=float(mi_rate), seed=int(seed), config=config)
     elif name.startswith("wordnet:"):
         _, root, depth = name.split(":")
         flat = gu.build_wordnet_graph(roots=[root], max_depth=int(depth), config=config)

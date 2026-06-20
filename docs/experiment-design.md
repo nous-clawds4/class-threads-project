@@ -134,4 +134,29 @@ removals and identical repair edges (asserted).
 | SHACL/SPARQL baselines | `src/experiment/baselines.py` | ⬜ todo |
 | Wikidata ingestion | `src/graph_utils.py` / new loader | ⬜ todo |
 | Experiment runner (factor grid → parquet) | `src/experiment/experiment.py` | ⬜ todo |
-| Stats + figures | `src/experiment/stats.py`, `figures.py` | ⬜ todo |
+| Money runner + adversarial Tier-B rewiring | `src/experiment/money.py`, `corruption.py` | ✅ |
+| Stats (bootstrap CIs, Wilcoxon) | `src/experiment/stats.py` | ⬜ todo |
+
+## 11. Findings so far (2026-06-20)
+
+**Tier A — degradation & recovery (Fig 1, Fig 5).** Repair fully recovers
+structurally-implied breaks (E-SO, E-HX) at precision 1.0. Conservatism is
+visible: membership loss (E-HE) is *not* auto-repaired at θ=0.75. The dual-node
+advantage is **real but narrow** — single-node is blind only to `hasExtension`-
+layer breaks (E-HX); for E-SO/E-HE the split buys nothing on detection (the
+pre-committed null result).
+
+**Money figure — the pivotal finding (Fig 2, Fig 3).** With repair run
+*autonomously* (no oracle handed in) and scored against the pristine graph,
+**repair fidelity is a faithful function of guidance integrity**: clean taxonomy
+→ precision 1.0; rewiring the taxonomy drives precision down (~1.0 → ~0.3–0.6 at
+10–40% rewire) and hallucination up. **Critically, the fixed per-edge-*type*
+confidences (1.0/0.9/0.55) make θ an on/off switch, not a graded precision–recall
+knob** — hallucination is flat in θ until repair shuts off entirely (θ>0.9).
+Implication: conservatism (high θ) can *refuse* repair wholesale when guidance is
+suspect, but cannot *selectively filter* good proposals from bad. A genuine
+precision–recall knob needs an **evidence-based / corroboration-based per-proposal
+confidence**, which requires structural redundancy that near-tree WordNet lacks —
+motivating the **Wikidata DAG** and connecting to KG-completion confidence
+(AMIE / embeddings). This reframes the contribution toward *when structural
+repair is trustworthy* and *what signal makes conservatism selective*.

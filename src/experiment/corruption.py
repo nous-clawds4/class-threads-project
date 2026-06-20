@@ -64,6 +64,7 @@ def corrupt(
     policy: str = "UNIF",
     guidance_removal_rho: float = 0.0,
     guidance_distractor_rate: float = 0.0,
+    guidance_rewire_rate: float = 0.0,
     config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[nx.DiGraph, Set[Edge], Set[Edge]]:
     """Return ``(damaged_graph, removed, injected)`` without mutating ``graph``.
@@ -131,8 +132,23 @@ def corrupt(
             if a != b and not g.has_edge(a, b):
                 g.add_edge(a, b, relation=sub, layer="abstract", distractor=True)
                 injected.add((a, b, sub))
+    if guidance_rewire_rate > 0:
+        # Rewire a fraction of subClassOf edges to a WRONG parent: this destroys
+        # the real path AND creates a misleading one, so *autonomous* repair
+        # (which infers its target from this corrupted taxonomy) fabricates edges.
+        abst = [n for n, d in g.nodes(data=True) if d.get("kind") == KIND_ABSTRACT]
+        for u, v in _sample(_edges_with_relation(g, sub),
+                            round(guidance_rewire_rate * len(_edges_with_relation(g, sub))), rng):
+            g.remove_edge(u, v)
+            removed.add((u, v, sub))
+            cands = [a for a in abst if a != u and a != v and not g.has_edge(u, a)]
+            if cands:
+                w = cands[int(rng.choice(len(cands)))]
+                g.add_edge(u, w, relation=sub, layer="abstract", distractor=True)
+                injected.add((u, w, sub))
 
-    tier = "B" if (guidance_removal_rho or guidance_distractor_rate) else "A"
+    tier = ("B" if (guidance_removal_rho or guidance_distractor_rate
+                    or guidance_rewire_rate) else "A")
     logger.info("Corrupt[%s rho=%.2f policy=%s]: removed=%d injected=%d (Tier %s)",
                 arm, rho, policy, len(removed), len(injected), tier)
     return g, removed, injected

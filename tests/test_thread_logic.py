@@ -109,6 +109,32 @@ def test_partial_expansion_stays_connected(flat):
     assert dual.has_edge("mammal", "extension:dog")
 
 
+def test_partial_expansion_threads_from_unexpanded_concepts(flat, cfg):
+    """Regression: under partial (strategy='list') expansion, a valid thread must
+    be able to ORIGINATE at an unexpanded concept, which plays both roles and so
+    has no ``hasExtension`` edge. Previously coverage collapsed because
+    ``find_thread`` always required a ``hasExtension`` first hop.
+    """
+    # Only 'animal' and 'dog' are expanded; mammal/cat/truck/... stay single nodes.
+    dual = p1.expand_to_dual_nodes(flat, selected=["animal", "dog"])
+    # Snapshot ground truth from the pristine partial graph (undamaged).
+    expected = set(p2.validate_threads(dual, config=cfg).expected)
+
+    report = p2.validate_threads(dual, config=cfg, expected=expected)
+    # Every expected (instance, concept) pair threads despite partial expansion.
+    assert report.coverage == 1.0
+    assert report.broken == set()
+
+    # Threads that ORIGINATE at an unexpanded concept node (no abstract:/hasExtension).
+    assert p2.find_thread(dual, "mammal", "rex", cfg) is not None
+    assert p2.find_thread(dual, "cat", "whiskers", cfg) is not None
+    assert p2.find_thread(dual, "truck", "big_rig", cfg) is not None
+    # An expanded concept still threads through unexpanded relays.
+    assert p2.find_thread(dual, "animal", "rex", cfg) is not None
+    # No false positives: a genuine non-membership still returns None.
+    assert p2.find_thread(dual, "cat", "rex", cfg) is None
+
+
 # ---------------------------------------------------------------------------
 # Thread search / validation
 # ---------------------------------------------------------------------------

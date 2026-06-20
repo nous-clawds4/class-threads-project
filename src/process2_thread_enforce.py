@@ -96,6 +96,11 @@ def find_thread(
 
     A valid thread is ``abstract:C -hasExtension-> extension:C -supersetOf*->
     extension:L -hasElement-> instance``.
+
+    A concept that was *not* expanded into dual nodes (Process 1 with
+    ``strategy="list"``) keeps a single node playing both the abstract and
+    extension role, so it has no ``hasExtension`` edge; the thread is allowed to
+    originate at that node directly.
     """
     rels = get_relations(config)
     rel_has_ext, rel_sup, rel_he = (
@@ -107,14 +112,24 @@ def find_thread(
         return None
 
     # Step 1: leave the abstract node via hasExtension into the extension layer.
-    entries = [
-        v for v in graph.successors(start)
+    # Each entry is ``(entry_node, initial_path)``.
+    entries: List[Tuple[str, List[str]]] = [
+        (v, [start, v])
+        for v in graph.successors(start)
         if graph.edges[start, v].get("relation") == rel_has_ext
     ]
+    # An *unexpanded* concept (start is the plain concept node, no abstract node
+    # exists) has no outgoing hasExtension edge but plays the extension role
+    # itself, so let the thread originate there. Note: an expanded-but-damaged
+    # concept resolves ``start`` to its abstract node (start != concept), so a
+    # removed hasExtension edge is still correctly reported as broken.
+    if not entries and start == concept:
+        entries = [(start, [start])]
+
     # Step 2: DFS down supersetOf edges, looking for a hasElement to the instance.
-    for entry in entries:
+    for entry, init_path in entries:
         visited: Set[str] = set()
-        stack: List[Tuple[str, List[str]]] = [(entry, [start, entry])]
+        stack: List[Tuple[str, List[str]]] = [(entry, init_path)]
         while stack:
             node, path = stack.pop()
             if node in visited:

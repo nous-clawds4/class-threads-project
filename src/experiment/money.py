@@ -33,7 +33,7 @@ from .util import make_rng  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-DATASETS = ["synthetic", "wordnet:vehicle.n.01:2"]
+DATASETS = ["synthetic", "wordnet:vehicle.n.01:2", "wikidata:Q42889:3"]
 THETAS = [0.0, 0.50, 0.55, 0.60, 0.75, 0.85, 0.90, 0.95, 1.00, 1.01]
 REWIRE_RATES = [0.0, 0.1, 0.2, 0.4]
 ARM = "E-SO"          # thread-layer damage that creates genuinely broken pairs
@@ -69,24 +69,19 @@ def run_money_grid(datasets, thetas, rewire_rates, seeds, config) -> List[Dict[s
                     g0, ARM, RHO_THREAD, rng, config=config, guidance_rewire_rate=rewire)
                 surviving = set(g_dmg.nodes())
                 v0 = M.valid_pairs(g_dmg, exp, config)
-                fp0 = M.pair_false_positives(g_dmg, exp, config)
                 broken0 = len(exp) - len(v0)
                 for theta in thetas:
                     g = copy.deepcopy(g_dmg)
                     res = p2.repair_threads(g, config=_cfg_theta(config, theta))  # AUTONOMOUS
                     added = M.added_edges(res)
                     v1 = M.valid_pairs(g, exp, config)
-                    fp1 = M.pair_false_positives(g, exp, config)
-                    true_new, false_new = len(v1 - v0), len(fp1 - fp0)
                     rows.append(dict(
                         dataset=ds, rewire=rewire, theta=theta, seed=seed,
                         n_added=len(added),
                         edge_precision=_nn(M.edge_precision(added, pe)),
                         edge_recall=_nn(M.edge_recall(added, removed, pe, surviving)),
                         hallucination=_nn(M.hallucination_rate(added, pe)),
-                        pair_precision=(true_new / (true_new + false_new)
-                                        if (true_new + false_new) else float("nan")),
-                        pair_recall=(true_new / broken0 if broken0 else float("nan")),
+                        pair_recall=(len(v1 - v0) / broken0 if broken0 else float("nan")),
                         cov_after=len(v1) / len(exp),
                     ))
     return rows

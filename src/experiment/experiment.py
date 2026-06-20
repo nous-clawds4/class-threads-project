@@ -21,7 +21,7 @@ from .util import make_rng
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DATASETS = ["synthetic", "wordnet:vehicle.n.01:2"]
+DEFAULT_DATASETS = ["synthetic", "wordnet:vehicle.n.01:2", "wikidata:Q42889:3"]
 DEFAULT_ARMS = ["E-SO", "E-HE", "E-HX"]
 DEFAULT_RHOS = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
 DEFAULT_SEEDS = 20
@@ -37,6 +37,10 @@ def build_dataset(name: str, config):
     elif name.startswith("wordnet:"):
         _, root, depth = name.split(":")
         flat = gu.build_wordnet_graph(roots=[root], max_depth=int(depth), config=config)
+    elif name.startswith("wikidata:"):
+        from .wikidata import build_wikidata_graph
+        _, qid, depth = name.split(":")
+        flat = build_wikidata_graph(root=qid, max_depth=int(depth), config=config)
     else:
         raise ValueError(f"Unknown dataset {name!r}")
     return flat, p1.expand_to_dual_nodes(flat, config=config)

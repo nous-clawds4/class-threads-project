@@ -62,6 +62,37 @@ def test_holdout_split_partitions(orc):
     assert len(held) == round(0.15 * len(orc.expected))
 
 
+# --- synthetic DAG generator (redundancy independent variable) -------------
+def _redundancy(flat):
+    import networkx as nx
+    tax = nx.DiGraph()
+    for u, v, d in flat.edges(data=True):
+        if d["relation"] == "subClassOf":
+            tax.add_edge(u, v)
+    tot = red = 0
+    for c in tax.nodes():
+        for a in nx.descendants(tax, c):
+            tot += 1
+            if sum(1 for nb in tax.successors(c)
+                   if nb == a or (tax.has_node(nb) and a in nx.descendants(tax, nb))) > 1:
+                red += 1
+    return red / tot if tot else 0.0
+
+
+def test_synthetic_dag_tree_null_and_tunable(cfg):
+    """mi_rate=0 is a pure tree (no redundancy); mi_rate>0 adds it. The skip-edge
+    target is chosen from a SORTED candidate list, so the graph must not depend on
+    PYTHONHASHSEED (regression guard for the set-iteration determinism bug)."""
+    tree = gu.build_synthetic_dag(levels=4, branching=3, mi_rate=0.0, seed=1, config=cfg)
+    dense = gu.build_synthetic_dag(levels=4, branching=3, mi_rate=0.8, seed=1, config=cfg)
+    assert _redundancy(tree) == 0.0          # tree: every ancestor pair has one route
+    assert _redundancy(dense) > 0.0          # DAG: multiple-inheritance redundancy
+    # reproducible within a build
+    again = gu.build_synthetic_dag(levels=4, branching=3, mi_rate=0.8, seed=1, config=cfg)
+    edges = lambda g: {(u, v, d["relation"]) for u, v, d in g.edges(data=True)}
+    assert edges(dense) == edges(again)
+
+
 # --- corruption ------------------------------------------------------------
 def test_corruption_removes_and_is_nonmutating(G0, cfg):
     n_before = G0.number_of_edges()

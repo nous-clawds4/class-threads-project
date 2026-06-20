@@ -245,9 +245,12 @@ def build_synthetic_dag(
             if rng.random() >= mi_rate:
                 continue
             # proper ancestors at least two layers up (so the parent chain is a
-            # genuine *alternative* route to the new direct skip edge)
-            anc = [a for a in nx.descendants(g, c)  # child->parent reach = ancestors
-                   if deep_levels.get(a, L) <= L - 2 and not g.has_edge(c, a)]
+            # genuine *alternative* route to the new direct skip edge). NOTE:
+            # ``sorted`` is load-bearing — ``nx.descendants`` returns a set whose
+            # iteration order is hash-randomized, so indexing it with ``rng``
+            # without sorting would make the whole graph depend on PYTHONHASHSEED.
+            anc = sorted(a for a in nx.descendants(g, c)  # child->parent reach = ancestors
+                         if deep_levels.get(a, L) <= L - 2 and not g.has_edge(c, a))
             if anc:
                 target = anc[int(rng.integers(len(anc)))]
                 g.add_edge(c, target, relation=rels["sub_class_of"])

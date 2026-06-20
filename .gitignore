@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# NLTK downloaded corpora (large; users download via setup step)
+nltk_data/
+
+# Generated graph artifacts / visualizations
+data/processed/*.graphml
+data/processed/*.gpickle
+data/processed/*.json
+*.html
+
+# OS
+.DS_Store

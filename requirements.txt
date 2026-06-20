@@ -1,0 +1,20 @@
+# Core graph + data
+networkx>=3.0
+pyyaml>=6.0
+
+# Visualization
+matplotlib>=3.6
+pyvis>=0.3.2
+
+# WordNet / NLP data source (optional real-data path)
+nltk>=3.8
+
+# Notebook
+jupyter>=1.0
+ipykernel>=6.0
+
+# Testing
+pytest>=7.0
+
+# --- Optional: Neo4j path (not required for the first version) ---
+# neo4j>=5.0

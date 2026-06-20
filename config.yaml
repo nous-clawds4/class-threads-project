@@ -1,0 +1,58 @@
+# Configuration for the Class Thread model demo.
+#
+# Edit this file to control data source, which concepts get dual-node
+# (abstract + extension) representation, and how Process 2 repair behaves.
+
+# ---------------------------------------------------------------------------
+# Edge / relation type names. Centralized here so the whole pipeline agrees
+# on the vocabulary used to detect and build Class Threads.
+# ---------------------------------------------------------------------------
+relations:
+  has_extension: hasExtension   # abstract -> extension
+  sub_class_of: subClassOf      # flat taxonomy input + abstract-layer mirror (child -> parent)
+  instance_of: instanceOf       # flat input (instance -> concept)
+  superset_of: supersetOf       # extension -> extension, general -> specific (thread-bearing)
+  has_element: hasElement       # extension -> instance (thread-bearing)
+
+# A valid Class Thread is the forward path:
+#   hasExtension -> (0+ supersetOf) -> hasElement
+
+# ---------------------------------------------------------------------------
+# Data source: "synthetic" (default, runs anywhere) or "wordnet" (needs nltk).
+# ---------------------------------------------------------------------------
+data:
+  source: synthetic
+  wordnet:
+    # Root synsets to pull a small noun subset from (used only if source=wordnet).
+    roots:
+      - animal.n.01
+      - vehicle.n.01
+    max_depth: 3
+
+# ---------------------------------------------------------------------------
+# Process 1 — Dual-Node Expansion
+# Which concepts get expanded into abstract:{c} + extension:{c}.
+#   strategy: "all"   -> expand every concept node
+#             "list"  -> expand only the names under `concepts`
+# ---------------------------------------------------------------------------
+process1:
+  strategy: all
+  concepts: []   # used only when strategy == "list"
+
+# ---------------------------------------------------------------------------
+# Process 2 — Class Thread Enforcement
+# ---------------------------------------------------------------------------
+process2:
+  repair:
+    enabled: true
+    # Only perform a repair when our confidence heuristic >= this threshold.
+    min_confidence: 0.75
+    # Hard cap on how many edges repair may add (safety valve).
+    max_new_edges: 100
+
+# ---------------------------------------------------------------------------
+# Output paths
+# ---------------------------------------------------------------------------
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed

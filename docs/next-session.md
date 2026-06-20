@@ -9,7 +9,7 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
 - **Goal:** an arXiv preprint demonstrating the Class Thread / dual-node model
   via an **integrity & repair** empirical study. Framing is **data-driven**:
   make the stronger dual-node claim only if the data supports it.
-- **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~7 commits
+- **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~12 commits
   ahead of `main`. **68 tests pass** (`.venv/bin/python -m pytest -q`).
   Note: `python` is not on PATH; use `.venv/bin/python`.
 - **Datasets wired in:** `synthetic` (control), `wordnet:vehicle.n.01:2` (scale),
@@ -51,8 +51,10 @@ Wikidata loads from the committed cache (offline). To refresh:
 | `wikidata.py` | bounded P279/P31 slice loader, cleaned + cached |
 
 Repair lives in `src/process2_thread_enforce.py` (`repair_threads`, deterministic
-tie-break). Confidence constants: `CONF_HAS_EXTENSION=1.0`, `CONF_SUPERSET=0.9`,
-`CONF_HAS_ELEMENT=0.55`.
+tie-break). It now builds `EdgeProposal` objects and takes a pluggable
+`confidence` builder (default = the per-edge-TYPE priors `CONF_HAS_EXTENSION=1.0`
+/ `CONF_SUPERSET=0.9` / `CONF_HAS_ELEMENT=0.55`, which is the baseline; the
+evidence-based scorer lives in `confidence.py`).
 
 ## Findings so far
 
@@ -78,34 +80,35 @@ tie-break). Confidence constants: `CONF_HAS_EXTENSION=1.0`, `CONF_SUPERSET=0.9`,
    *understates* corroboration. Full writeup + 7 caveats in
    `docs/experiment-design.md` §11.
 
-## Primary task — COMPLETE
+## Completed this session (2026-06-20) — primary task + two follow-ons
 
-The evidence-based per-proposal confidence is implemented, tested (9 new tests),
-wired into the money grid, and verified. See §11 of the design doc. Key code:
-`src/process2_thread_enforce.py` (`EdgeProposal` + pluggable `confidence`),
-`src/experiment/confidence.py` (`corroboration_confidence`, `per_type_confidence`),
-`src/graph_utils.py` (`build_synthetic_dag`), `src/experiment/money.py`
-(`fig4_pr_curve`, `fig6_redundancy_scaling`, `precision_advantage`).
+All committed and pushed; see §11 of the design doc for the full writeup + caveats.
+
+1. **Evidence-based per-proposal confidence** — `repair_threads` now builds
+   `EdgeProposal`s and takes a pluggable `confidence` builder.
+   `src/experiment/confidence.py`: `corroboration_confidence` (ranks each proposal
+   by independent surviving routes) + `per_type_confidence` (baseline).
+   `src/graph_utils.py`: `build_synthetic_dag` (tunable-redundancy control).
+   `src/experiment/money.py`: `fig4_pr_curve` (graded PR frontier) +
+   `fig6_redundancy_scaling`. Adversarially verified (no leakage, not rigged).
+2. **Closure-aware (semantic) precision** — `metrics_ext.closure_precision` /
+   `build_semantic_oracle`; credits edges true in the pristine *closure*. Only
+   improves corroboration; fig4 overlays both frontiers (caveat 5).
+3. **Stats** — `src/experiment/stats.py` (bootstrap CIs, paired Wilcoxon, Holm);
+   `stats_money.csv` + fig6 CI bars. Significant across the synthetic sweep
+   (Holm p ≤ 7e-4), exactly 0 on trees, **marginal** on Wikidata (CI excludes 0,
+   raw p=0.028, Holm p=0.11).
+4. **Bug fix** — a PYTHONHASHSEED-dependence in `build_synthetic_dag` (sorted the
+   skip-edge candidate list); all sdag results are now exactly reproducible.
 
 ### Recommended next steps (in priority order)
-1. ~~**Closure-aware precision** (caveat 5)~~ **DONE this session**:
-   `metrics_ext.closure_precision` / `build_semantic_oracle` credit an added edge
-   if `C ⊑ P` holds in the pristine *closure*. Confirmed it only improves
-   corroboration (closure AP advantage ≥ exact at every redundancy); fig4 overlays
-   both frontiers. Also fixed a PYTHONHASHSEED-dependence in `build_synthetic_dag`
-   that made the sdag results non-reproducible.
-2. ~~**Stats**~~ **DONE this session**: `src/experiment/stats.py` (bootstrap CIs,
-   paired Wilcoxon, Holm–Bonferroni); `stats_money.csv` + fig6 CI error bars.
-   Result: the redundancy-scaling advantage is significant across the synthetic
-   sweep (Holm p ≤ 7e-4) and 0 on trees; Wikidata is positive but **marginal**
-   (CI excludes 0, raw p=0.028, Holm p=0.11) — its redundancy (0.036) is too low.
-3. **Denser real DAG** (now the top open item): `wikidata:Q42889:3` redundancy is
-   only 0.036, so the real effect is small/marginal. Fetch a higher-redundancy real
-   slice (richer-multiple-inheritance root, or bump `max_classes`/`max_depth`) to
-   land a significant real-data point further along the fig6 trend. WDQS was flaky
-   (502s) on 2026-06-20.
-4. **SHACL / SPARQL baselines** (secondary task, §8/§10) — see below.
-5. **Optional realism**: constrain `guidance_rewire_rate` to same-or-higher-layer
+1. **Denser real DAG** (top open item): `wikidata:Q42889:3` redundancy is only
+   0.036, so the real effect is positive but *not* Holm-significant. Fetch a
+   higher-redundancy real slice (a richer-multiple-inheritance root, or bump
+   `max_classes`/`max_depth`) to land a significant real-data point further along
+   the fig6 trend. WDQS was flaky (502s) on 2026-06-20 — retry when healthy.
+2. **SHACL / SPARQL baselines** (secondary task, §8/§10) — see below.
+3. **Optional realism**: constrain `guidance_rewire_rate` to same-or-higher-layer
    targets so the damaged taxonomy stays acyclic (caveat 4), or keep the
    unconstrained adversary and just disclose it.
 

@@ -130,21 +130,47 @@ deps are already in `requirements.txt`.
 
 > We're resuming the **Class Thread integrity & repair preprint** (branch
 > `feat/integrity-repair-experiment`). Read `docs/next-session.md`,
-> `docs/experiment-design.md` (esp. §11 findings — read the corroboration
-> resolution + its 7 caveats), and `master-prompt.md`. The harness is in
-> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 68 passing) to
-> confirm green. (`python` is not on PATH — use `.venv/bin/python`.)
+> `docs/experiment-design.md` (§11 findings + the 7 corroboration caveats; §8/§10
+> for the baselines), and `master-prompt.md`. Use `.venv/bin/python` — `python` is
+> NOT on PATH; run `.venv/bin/python -m pytest -q` to confirm green (68 passing).
 >
-> The **evidence-based per-proposal confidence is DONE** (corroboration scorer →
-> graded PR frontier scaling with graph redundancy; §11), including the
-> closure-aware precision metric, a determinism fix, and the **stats module**
-> (bootstrap CIs + paired Wilcoxon + Holm; significant across the synthetic sweep,
-> marginal on the sparse real slice). Pick up the recommended next steps in
-> `docs/next-session.md` → "Primary task — COMPLETE": (1) a **denser real Wikidata
-> slice** to push the real-data point to significance on fig6, and/or (2) the
-> **flat+SHACL / flat+SPARQL-property-path baselines** (`docs/experiment-design.md`
-> §8/§10).
+> **State.** The evidence-based per-proposal **corroboration confidence is done**:
+> it turns the repair threshold θ into a graded precision–recall knob whose
+> average-precision advantage over the per-type baseline scales with graph
+> redundancy — Holm-significant across the synthetic `sdag` sweep, exactly 0 on
+> trees, but only **marginal** on the one real slice `wikidata:Q42889:3` (its
+> multiple-inheritance redundancy is just 0.036; bootstrap CI excludes 0 but it
+> fails Holm correction). Closure-aware precision and a stats module
+> (`stats.py` → `stats_money.csv`, fig6 CI bars) are in place.
 >
-> Framing is data-driven — report honestly, including null/negative results.
-> Commit incrementally on this branch and keep `docs/experiment-design.md` §11
-> updated.
+> **Primary task: land a significant real-data point.** Build a *denser* real
+> Wikidata DAG (redundancy materially above 0.036) and show the corroboration AP
+> advantage is Holm-significant on it, turning the marginal real result into a real
+> one.
+> 1. Find a higher-redundancy root — a P279 subclass region with genuine multiple
+>    inheritance AND P31 instances at the leaves (vehicle is too tree-like).
+>    Candidates worth probing: weapon/aircraft variants, organizations, diseases,
+>    chemical/material taxonomies. **Measure redundancy first** (`money.
+>    dataset_redundancy`) and aim for ≳0.15; you may also bump
+>    `build_wikidata_graph`'s `max_classes`/`max_depth`. WDQS was throwing 502s on
+>    2026-06-20 — retry politely; the loader sleeps and caches to `data/raw/` (one
+>    fetch, commit the cache so runs stay offline).
+> 2. Add the slice to `money.DATASETS`; re-run `.venv/bin/python -m
+>    src.experiment.money` then `.venv/bin/python -m src.experiment.stats`. Keep
+>    `wikidata:Q42889:3` as the sparse comparator.
+> 3. **Acceptance:** the new slice lands on the fig6 redundancy trend with a
+>    bootstrap CI excluding 0 and a Holm-significant paired Wilcoxon. If it does
+>    NOT go significant, report that honestly — a real DAG can behave unlike the
+>    synthetic sweep (cycles, messy inheritance), which is itself a finding. Watch
+>    the caveats: corroboration trusts reachability in a possibly-cyclic damaged
+>    graph (caveat 4), and the exact-vs-closure precision gap may widen on real
+>    data.
+>
+> **If time (or swap to primary): SHACL / SPARQL baselines** (§8/§10) — `flat+SHACL`
+> (pyshacl) and `flat+SPARQL property-path` (rdflib) on the same corruption suite;
+> compare detection F1 + localization, not just pass/fail validation, to answer the
+> "already solved by validation" objection. Both deps are in `requirements.txt`;
+> target `src/experiment/baselines.py`.
+>
+> Framing is data-driven — report honestly, including null/negative results. Commit
+> incrementally on this branch and keep `docs/experiment-design.md` §11 updated.

@@ -139,7 +139,7 @@ removals and identical repair edges (asserted).
 | Corroboration confidence + per-type baseline | `src/experiment/confidence.py` | ✅ |
 | Synthetic DAG w/ tunable redundancy | `src/graph_utils.py` (`build_synthetic_dag`) | ✅ |
 | Closure-aware (semantic) precision | `src/experiment/metrics_ext.py` | ✅ |
-| Stats (bootstrap CIs, Wilcoxon) | `src/experiment/stats.py` | ⬜ todo |
+| Stats (bootstrap CIs, paired Wilcoxon, Holm) | `src/experiment/stats.py` | ✅ |
 
 ## 11. Findings so far (2026-06-20)
 
@@ -200,6 +200,16 @@ What this buys, stated precisely:
   confirmed the monotone ordering and the no-leakage / not-rigged conclusions.
   These numbers are now exactly reproducible: a PYTHONHASHSEED-dependence in the
   synthetic-DAG generator was found and fixed.)
+- **Significance (paired by trial; `stats.py`, Fig 6 error bars).** Bootstrap 95%
+  CIs and paired Wilcoxon (Holm-corrected across the 7-dataset family, 24 paired
+  trials each) make the scaling claim quantitative: the advantage is **significant
+  across the whole synthetic redundancy sweep** (Holm p ≤ 7e-4, CIs excluding 0)
+  and **indistinguishable from 0 on all three trees** (CI exactly [0, 0], p=1).
+  The real Wikidata effect is positive and consistent — the per-trial bootstrap CI
+  [0.002, 0.012] excludes 0 and the raw Wilcoxon p=0.028 — but it **does not
+  survive Holm correction** (p=0.11). Report it as marginal, not significant: an
+  honest reflection of how little multiple-inheritance redundancy (0.036) that
+  slice carries.
 
 Honest caveats — this is a precision–**recall trade**, not a free lunch:
 
@@ -213,9 +223,10 @@ Honest caveats — this is a precision–**recall trade**, not a free lunch:
 2. **Precision is bought with recall everywhere off the redundant subgraph.**
    Corroboration achieves ~0 recall on real tree-region edges (it cannot tell a
    genuinely-missing tree edge from a fabrication — neither has an alternative
-   route). The headline operating points sit at low recall and small `n_added`
-   (e.g. ~2 edges on Wikidata) — high variance; report counts/CIs, not bare
-   precision.
+   route). The headline operating points sit at low recall and small `n_added`:
+   at corroboration's peak-precision point the dense-synthetic frontier rests on
+   only **~1–2 edges** (`stats_money.csv`) — high variance, which is exactly why
+   `stats.py` reports per-point CIs (Fig 6) rather than bare precision.
 3. **A soft prior, not a hard filter.** Rewiring-fabricated edges still receive
    corroboration > 0 at a measurable rate (≈8.7% on the dense DAG; max fabrication
    score 0.675, above some operating θ). The gate **reduces but does not eliminate**

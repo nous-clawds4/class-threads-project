@@ -10,7 +10,7 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
   via an **integrity & repair** empirical study. Framing is **data-driven**:
   make the stronger dual-node claim only if the data supports it.
 - **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~7 commits
-  ahead of `main`. **59 tests pass** (`.venv/bin/python -m pytest -q`).
+  ahead of `main`. **68 tests pass** (`.venv/bin/python -m pytest -q`).
   Note: `python` is not on PATH; use `.venv/bin/python`.
 - **Datasets wired in:** `synthetic` (control), `wordnet:vehicle.n.01:2` (scale),
   `wikidata:Q42889:3` (credibility — real DAG, 162 concepts / 120 instances / 6
@@ -26,7 +26,7 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
 ## How to run
 
 ```bash
-.venv/bin/python -m pytest -q                 # 59 tests  (python is NOT on PATH)
+.venv/bin/python -m pytest -q                 # 68 tests  (python is NOT on PATH)
 .venv/bin/python -m src.experiment.experiment # Tier-A grid -> results/results.parquet
 .venv/bin/python -m src.experiment.money      # money grid  -> results/money.parquet
 .venv/bin/python -m src.experiment.figures    # fig1, fig5
@@ -46,7 +46,8 @@ Wikidata loads from the committed cache (offline). To refresh:
 | `confidence.py` | per-proposal repair confidence: `per_type_confidence` (baseline) + `corroboration_confidence` |
 | `ablation.py` | single-node comparator (homologous flat corruption + closure detection) |
 | `experiment.py` | Tier-A factor-grid runner + `build_dataset` dispatch |
-| `money.py` | autonomous-repair runner (rewire × θ) + fidelity/θ-gate figures |
+| `money.py` | autonomous-repair runner (rewire × θ) + PR-frontier / redundancy figures |
+| `stats.py` | bootstrap CIs, paired Wilcoxon, Holm–Bonferroni; money AP-advantage summary |
 | `wikidata.py` | bounded P279/P31 slice loader, cleaned + cached |
 
 Repair lives in `src/process2_thread_enforce.py` (`repair_threads`, deterministic
@@ -93,13 +94,18 @@ wired into the money grid, and verified. See §11 of the design doc. Key code:
    corroboration (closure AP advantage ≥ exact at every redundancy); fig4 overlays
    both frontiers. Also fixed a PYTHONHASHSEED-dependence in `build_synthetic_dag`
    that made the sdag results non-reproducible.
-2. **Denser real DAG**: `wikidata:Q42889:3` redundancy is only 0.036 so the real
-   effect is small. Fetch a higher-redundancy real slice (richer-multiple-
-   inheritance root, or bump `max_classes`/`max_depth`) to land a real-data point
-   further along the fig6 trend. WDQS was flaky (502s) on 2026-06-20.
-3. **Stats** (`src/experiment/stats.py`): bootstrap CIs + paired Wilcoxon, and put
-   `n_added`/CIs on the low-recall money points (caveat 2).
-4. **Optional realism**: constrain `guidance_rewire_rate` to same-or-higher-layer
+2. ~~**Stats**~~ **DONE this session**: `src/experiment/stats.py` (bootstrap CIs,
+   paired Wilcoxon, Holm–Bonferroni); `stats_money.csv` + fig6 CI error bars.
+   Result: the redundancy-scaling advantage is significant across the synthetic
+   sweep (Holm p ≤ 7e-4) and 0 on trees; Wikidata is positive but **marginal**
+   (CI excludes 0, raw p=0.028, Holm p=0.11) — its redundancy (0.036) is too low.
+3. **Denser real DAG** (now the top open item): `wikidata:Q42889:3` redundancy is
+   only 0.036, so the real effect is small/marginal. Fetch a higher-redundancy real
+   slice (richer-multiple-inheritance root, or bump `max_classes`/`max_depth`) to
+   land a significant real-data point further along the fig6 trend. WDQS was flaky
+   (502s) on 2026-06-20.
+4. **SHACL / SPARQL baselines** (secondary task, §8/§10) — see below.
+5. **Optional realism**: constrain `guidance_rewire_rate` to same-or-higher-layer
    targets so the damaged taxonomy stays acyclic (caveat 4), or keep the
    unconstrained adversary and just disclose it.
 
@@ -115,7 +121,6 @@ deps are already in `requirements.txt`.
 - Whether to keep the per-type prior as a multiplier on the evidence score.
 - Held-out build-from-complement pipeline (oracle.py has `holdout_split`; the
   full pipeline is still TODO) for a second non-circular recall signal.
-- Stats module (bootstrap CIs, paired Wilcoxon) for publication-grade error bars.
 - Bump seeds for pre-registered primary cells (design §4) before final figures.
 
 ## Kickoff prompt (paste to start the next session)
@@ -124,17 +129,18 @@ deps are already in `requirements.txt`.
 > `feat/integrity-repair-experiment`). Read `docs/next-session.md`,
 > `docs/experiment-design.md` (esp. §11 findings — read the corroboration
 > resolution + its 7 caveats), and `master-prompt.md`. The harness is in
-> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 59 passing) to
+> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 68 passing) to
 > confirm green. (`python` is not on PATH — use `.venv/bin/python`.)
 >
 > The **evidence-based per-proposal confidence is DONE** (corroboration scorer →
 > graded PR frontier scaling with graph redundancy; §11), including the
-> closure-aware precision metric and a determinism fix. Pick up the recommended
-> next steps in `docs/next-session.md` → "Primary task — COMPLETE": (1) a
-> **denser real Wikidata slice** to strengthen the real-data point on fig6, (2)
-> **stats** (bootstrap CIs + paired Wilcoxon; `n_added`/CIs on low-recall money
-> points), and/or the **flat+SHACL / flat+SPARQL-property-path baselines**
-> (`docs/experiment-design.md` §8/§10).
+> closure-aware precision metric, a determinism fix, and the **stats module**
+> (bootstrap CIs + paired Wilcoxon + Holm; significant across the synthetic sweep,
+> marginal on the sparse real slice). Pick up the recommended next steps in
+> `docs/next-session.md` → "Primary task — COMPLETE": (1) a **denser real Wikidata
+> slice** to push the real-data point to significance on fig6, and/or (2) the
+> **flat+SHACL / flat+SPARQL-property-path baselines** (`docs/experiment-design.md`
+> §8/§10).
 >
 > Framing is data-driven — report honestly, including null/negative results.
 > Commit incrementally on this branch and keep `docs/experiment-design.md` §11

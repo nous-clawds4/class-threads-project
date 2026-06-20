@@ -363,8 +363,10 @@ def repair_threads(
                     f"hasElement would assert NEW membership: {leaf} -> {inst}")
 
     # Apply proposals: highest confidence first, honoring threshold and cap.
+    # Secondary key (u, v, relation) makes capped/tied selection deterministic
+    # and seed-order-independent (required for reproducible experiments).
     for u, v, relation, conf, reason in sorted(
-        proposals.values(), key=lambda t: t[3], reverse=True
+        proposals.values(), key=lambda t: (-t[3], t[0], t[1], t[2])
     ):
         record = {"u": u, "v": v, "relation": relation,
                   "confidence": conf, "reason": reason}

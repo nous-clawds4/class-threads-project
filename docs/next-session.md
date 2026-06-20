@@ -9,9 +9,11 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
 - **Goal:** an arXiv preprint demonstrating the Class Thread / dual-node model
   via an **integrity & repair** empirical study. Framing is **data-driven**:
   make the stronger dual-node claim only if the data supports it.
-- **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~12 commits
-  ahead of `main`. **68 tests pass** (`.venv/bin/python -m pytest -q`).
-  Note: `python` is not on PATH; use `.venv/bin/python`.
+- **Branch:** `feat/denser-wikidata` (freshly branched off `main`). The completed
+  corroboration study — this whole experiment — is now **merged into `main`** (PR
+  #1; the old `feat/integrity-repair-experiment` branch was deleted). **68 tests
+  pass** (`.venv/bin/python -m pytest -q`). Note: `python` is not on PATH; use
+  `.venv/bin/python`.
 - **Datasets wired in:** `synthetic` (control), `wordnet:vehicle.n.01:2` (scale),
   `wikidata:Q42889:3` (credibility — real DAG, 162 concepts / 120 instances / 6
   multiple-inheritance concepts, cached at `data/raw/wikidata_Q42889_d3.json`),
@@ -128,11 +130,13 @@ deps are already in `requirements.txt`.
 
 ## Kickoff prompt (paste to start the next session)
 
-> We're resuming the **Class Thread integrity & repair preprint** (branch
-> `feat/integrity-repair-experiment`). Read `docs/next-session.md`,
-> `docs/experiment-design.md` (§11 findings + the 7 corroboration caveats; §8/§10
-> for the baselines), and `master-prompt.md`. Use `.venv/bin/python` — `python` is
-> NOT on PATH; run `.venv/bin/python -m pytest -q` to confirm green (68 passing).
+> We're resuming the **Class Thread integrity & repair preprint** on branch
+> `feat/denser-wikidata` (already branched off `main`; the prior
+> `feat/integrity-repair-experiment` work is merged into `main` via PR #1). Read
+> `docs/next-session.md`, `docs/experiment-design.md` (§11 findings + the 7
+> corroboration caveats; §8/§10 for the baselines), and `master-prompt.md`. Use
+> `.venv/bin/python` — `python` is NOT on PATH; run `.venv/bin/python -m pytest -q`
+> to confirm green (68 passing).
 >
 > **State.** The evidence-based per-proposal **corroboration confidence is done**:
 > it turns the repair threshold θ into a graded precision–recall knob whose

@@ -30,7 +30,17 @@ Two independent layers supply corroboration, and we use both:
 2. ``supersetOf`` redundancy — the surviving *extension* layer (≈80% intact under
    the E-SO arm, and corrupted independently of ``subClassOf`` rewiring) routes
    ``parent ↝ child``. This is the cleanest "independent witness" because the
-   layer being queried is not the layer that produced the proposal.
+   layer being queried is not the layer that produced the proposal. NB: that
+   independence holds **only while no corruption arm rewires/injects
+   ``supersetOf``** (the E-SO arm only *removes* it, so surviving extension edges
+   are all genuine); re-check this if the extension layer is ever adversarially
+   corrupted.
+
+This is a SOFT prior, not a hard filter: a rewiring-fabricated edge can still
+pick up corroboration > 0 (e.g. when the unconstrained adversary injects a
+cross-layer ``subClassOf`` edge that manufactures a spurious route), so the gate
+*reduces* but does not *eliminate* hallucination. Its discriminative power is a
+function of the graph's redundancy — zero on a tree.
 
 The two are summed into a count ``k`` (capped), mapped through a saturating
 ``r = 1 − 1/(1+k) ∈ {0, .5, .667, .75, …}``, and blended with the per-type prior::

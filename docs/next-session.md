@@ -9,13 +9,19 @@ and [`master-prompt.md`](../master-prompt.md) (project origin).
 - **Goal:** an arXiv preprint demonstrating the Class Thread / dual-node model
   via an **integrity & repair** empirical study. Framing is **data-driven**:
   make the stronger dual-node claim only if the data supports it.
-- **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~5 commits
-  ahead of `main`. **44 tests pass** (`python -m pytest -q`).
+- **Branch:** `feat/integrity-repair-experiment` (pushed to `origin`), ~7 commits
+  ahead of `main`. **53 tests pass** (`.venv/bin/python -m pytest -q`).
+  Note: `python` is not on PATH; use `.venv/bin/python`.
 - **Datasets wired in:** `synthetic` (control), `wordnet:vehicle.n.01:2` (scale),
   `wikidata:Q42889:3` (credibility — real DAG, 162 concepts / 120 instances / 6
-  multiple-inheritance concepts, cached at `data/raw/wikidata_Q42889_d3.json`).
+  multiple-inheritance concepts, cached at `data/raw/wikidata_Q42889_d3.json`),
+  and `sdag:<levels>:<branching>:<mi_rate>:<seed>` (synthetic DAG with a
+  **tunable redundancy rate** — the controlled independent variable; `mi_rate=0`
+  is a tree).
 - **Figures:** `results/figures/` — fig1 (coverage degradation/recovery), fig2
-  (fidelity vs guidance corruption), fig3 (θ is on/off), fig5 (detection confusion).
+  (fidelity vs guidance corruption, per-type), fig3 (per-type θ is on/off), fig4
+  (**money: graded PR frontier, corroboration vs per-type**), fig5 (detection
+  confusion), fig6 (**precision advantage scales with graph redundancy**).
 
 ## How to run
 
@@ -57,39 +63,40 @@ tie-break). Confidence constants: `CONF_HAS_EXTENSION=1.0`, `CONF_SUPERSET=0.9`,
    per-edge-TYPE confidences make θ an on/off switch, not a graded knob.** On the
    Wikidata DAG, redundancy buffers edge loss (lower edge-recall at clean
    guidance), exposing the corroborating-path signal the next task exploits.
+4. **DONE (this session): evidence-based per-proposal confidence makes θ a graded
+   knob, bounded by graph redundancy.** A `corroboration_confidence` scorer that
+   ranks each proposal by independent surviving routes turns repair's single
+   uncontrolled operating point into a graded Pareto PR frontier — *frontier
+   extension*, not a higher-precision win at matched recall (the modes tie at
+   θ=0). Its average-precision advantage is **0 on three tree datasets** and rises
+   ~linearly with redundancy (to +0.07 at redundancy 0.23; Wikidata +0.006 on
+   trend). It's a precision–**recall trade**, a soft prior (some fabrications
+   survive), and useless/harmful on a tree. Adversarially verified (no leakage,
+   not rigged). Full writeup + 7 caveats in `docs/experiment-design.md` §11.
 
-## Primary task (next session): evidence-based per-proposal confidence
+## Primary task — COMPLETE
 
-**Why.** θ today only turns repair on/off because confidence is assigned per edge
-*type*, so good and fabricated proposals carry identical confidence and cannot be
-separated. A real precision–recall knob needs a confidence that scores *each
-proposed edge* by its evidential support — which the Wikidata DAG's multiple
-inheritance finally provides.
+The evidence-based per-proposal confidence is implemented, tested (9 new tests),
+wired into the money grid, and verified. See §11 of the design doc. Key code:
+`src/process2_thread_enforce.py` (`EdgeProposal` + pluggable `confidence`),
+`src/experiment/confidence.py` (`corroboration_confidence`, `per_type_confidence`),
+`src/graph_utils.py` (`build_synthetic_dag`), `src/experiment/money.py`
+(`fig4_pr_curve`, `fig6_redundancy_scaling`, `precision_advantage`).
 
-**Design sketch (refine, don't follow blindly):**
-1. Make repair's confidence pluggable: `repair_threads(..., confidence_fn=None)`,
-   defaulting to today's per-type constants (keep as the baseline/ablation).
-2. Implement a `corroboration_confidence(graph, proposal)`: blend the per-type
-   prior with a structural corroboration signal, e.g. the number of *independent
-   surviving paths* in the taxonomy/extension layer that support the proposed
-   link (a lone rewired/distractor edge → ~0 corroboration → low confidence; a
-   real edge corroborated by sibling structure / alternative routes → high). A
-   sibling-agreement ratio (how many co-hyponyms already thread to the target,
-   AMIE-style) is a strong alternative/companion signal.
-3. Re-run the money grid with the new confidence and sweep θ.
-
-**Acceptance criteria:** on `wikidata:Q42889:3` under Tier-B rewiring, the
-precision–recall points **spread into a real graded curve across θ** (not the
-current single collapsed point), and at matched recall the evidence-based
-confidence achieves **higher precision** than the per-type baseline. Report the
-ablation (per-type vs evidence-based) honestly even if the gain is small. Update
-`docs/experiment-design.md` §11.
-
-**Watch for:** on near-tree data (synthetic/WordNet) corroboration ≈ 0 by
-construction — the knob should help mainly where redundancy exists (Wikidata).
-That contrast is itself a result. Consider a larger/denser Wikidata slice (bump
-`max_classes`/`max_depth`, or a root with richer multiple inheritance) if the
-redundancy signal is too sparse.
+### Recommended next steps (in priority order)
+1. **Closure-aware precision** (caveat 5): the exact-typed-edge oracle counts
+   semantically-true transitive `supersetOf` shortcuts as hallucinations; add a
+   precision metric that credits an edge if `C ⊑ P` holds in the pristine
+   *closure*. Would only improve corroboration's apparent precision.
+2. **Denser real DAG**: `wikidata:Q42889:3` redundancy is only 0.036 so the real
+   effect is small. Fetch a higher-redundancy real slice (richer-multiple-
+   inheritance root, or bump `max_classes`/`max_depth`) to land a real-data point
+   further along the fig6 trend. WDQS was flaky (502s) on 2026-06-20.
+3. **Stats** (`src/experiment/stats.py`): bootstrap CIs + paired Wilcoxon, and put
+   `n_added`/CIs on the low-recall money points (caveat 2).
+4. **Optional realism**: constrain `guidance_rewire_rate` to same-or-higher-layer
+   targets so the damaged taxonomy stays acyclic (caveat 4), or keep the
+   unconstrained adversary and just disclose it.
 
 ## Secondary task: SHACL / SPARQL baselines
 
@@ -110,22 +117,20 @@ deps are already in `requirements.txt`.
 
 > We're resuming the **Class Thread integrity & repair preprint** (branch
 > `feat/integrity-repair-experiment`). Read `docs/next-session.md`,
-> `docs/experiment-design.md` (esp. §11 findings), and `master-prompt.md`. The
-> harness is in `src/experiment/`; run `python -m pytest -q` (expect 44 passing)
-> to confirm green.
+> `docs/experiment-design.md` (esp. §11 findings — read the corroboration
+> resolution + its 7 caveats), and `master-prompt.md`. The harness is in
+> `src/experiment/`; run `.venv/bin/python -m pytest -q` (expect 53 passing) to
+> confirm green. (`python` is not on PATH — use `.venv/bin/python`.)
 >
-> **Primary task:** design and implement an **evidence-based, per-proposal
-> confidence** for `repair_threads` so the threshold θ becomes a real
-> precision–recall knob (today it's on/off because confidences are fixed per edge
-> *type*). Test on the Wikidata DAG (`wikidata:Q42889:3`), whose multiple-
-> inheritance redundancy provides corroborating paths. Success = a graded
-> precision–recall curve emerges in the money figure and beats the per-type
-> baseline at matched recall; see `docs/next-session.md` → "Primary task" for the
-> design sketch and acceptance criteria. Keep the per-type confidence as the
-> ablation baseline.
+> The **evidence-based per-proposal confidence is DONE** (corroboration scorer →
+> graded PR frontier scaling with graph redundancy; §11). Pick up the recommended
+> next steps in `docs/next-session.md` → "Primary task — COMPLETE": (1) a
+> **closure-aware precision** metric (caveat 5), (2) a **denser real Wikidata
+> slice** to strengthen the real-data point on fig6, (3) **stats** (bootstrap
+> CIs + paired Wilcoxon; `n_added`/CIs on low-recall money points), and/or the
+> **flat+SHACL / flat+SPARQL-property-path baselines** (`docs/experiment-design.md`
+> §8/§10).
 >
-> **If time:** the flat+SHACL / flat+SPARQL-property-path baselines
-> (`docs/experiment-design.md` §8/§10).
->
-> Framing is data-driven — report honestly, including null results. Commit
-> incrementally on this branch and keep `docs/experiment-design.md` §11 updated.
+> Framing is data-driven — report honestly, including null/negative results.
+> Commit incrementally on this branch and keep `docs/experiment-design.md` §11
+> updated.

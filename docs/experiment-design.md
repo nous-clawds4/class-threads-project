@@ -128,13 +128,16 @@ removals and identical repair edges (asserted).
 | Edge/pair metrics | `src/experiment/metrics_ext.py` | ✅ (detection/localization/held-out-recovery todo) |
 | Repair determinism fix | `src/process2_thread_enforce.py` | ✅ |
 | Core tests | `tests/test_experiment_core.py` | ✅ (12 tests) |
-| Single-node ablation | `src/experiment/ablation.py` | ⬜ todo |
-| Adversarial Tier-B distractors | `src/experiment/corruption.py` | ⬜ todo (smoke finding §3) |
+| Single-node ablation | `src/experiment/ablation.py` | ✅ |
+| Adversarial Tier-B distractors | `src/experiment/corruption.py` | ✅ (rewiring) |
 | Held-out build-from-complement pipeline | `src/experiment/oracle.py` | ⬜ todo |
 | SHACL/SPARQL baselines | `src/experiment/baselines.py` | ⬜ todo |
-| Wikidata ingestion | `src/graph_utils.py` / new loader | ⬜ todo |
-| Experiment runner (factor grid → parquet) | `src/experiment/experiment.py` | ⬜ todo |
+| Wikidata ingestion | `src/experiment/wikidata.py` | ✅ |
+| Experiment runner (factor grid → parquet) | `src/experiment/experiment.py` | ✅ |
 | Money runner + adversarial Tier-B rewiring | `src/experiment/money.py`, `corruption.py` | ✅ |
+| Pluggable per-proposal confidence (EdgeProposal) | `src/process2_thread_enforce.py` | ✅ |
+| Corroboration confidence + per-type baseline | `src/experiment/confidence.py` | ✅ |
+| Synthetic DAG w/ tunable redundancy | `src/graph_utils.py` (`build_synthetic_dag`) | ✅ |
 | Stats (bootstrap CIs, Wilcoxon) | `src/experiment/stats.py` | ⬜ todo |
 
 ## 11. Findings so far (2026-06-20)
@@ -160,3 +163,86 @@ confidence**, which requires structural redundancy that near-tree WordNet lacks 
 motivating the **Wikidata DAG** and connecting to KG-completion confidence
 (AMIE / embeddings). This reframes the contribution toward *when structural
 repair is trustworthy* and *what signal makes conservatism selective*.
+
+**Resolution — corroboration confidence makes θ a graded knob, bounded by graph
+redundancy (Fig 4, Fig 6; 2026-06-20, adversarially verified).** We replaced the
+fixed per-edge-*type* confidence with a pluggable per-*proposal* scorer
+(`repair_threads(..., confidence=…)`; `src/experiment/confidence.py`). The
+`corroboration_confidence` scorer ranks each proposed `supersetOf(ext:P→ext:C)`
+edge (asserting `C ⊑ P`) by how many **independent surviving routes** entail it —
+alternative `subClassOf` paths plus the independently-corrupted `supersetOf`
+extension layer (a saturating count `k`, `r = 1 − 1/(1+k)`, blended with the
+per-type prior via `floor`; `floor = 1` recovers the baseline exactly). It reads
+**only the damaged graph's surviving structure** — no `pristine_edges`, `removed`,
+`distractor` flag, or `expected` (leakage audit: clean). A lone rewired edge to a
+random wrong parent has no alternative route → ≈0 corroboration → low confidence.
+
+What this buys, stated precisely:
+
+- **Frontier extension, *not* a higher-precision win at matched recall.** The two
+  scorers coincide at exactly one operating point (θ=0, where nothing is filtered):
+  identical edge set, identical precision. The per-type scorer can express *only*
+  that point (every `supersetOf` shares confidence 0.9, so θ is on/off and cliffs
+  to recall 0 at θ>0.9). Corroboration **reproduces** that point and then traces a
+  graded Pareto frontier of higher-precision/lower-recall operating points the
+  baseline structurally cannot reach — on the dense synthetic DAG, precision
+  0.30→0.63→0.97→1.00 as recall falls 0.62→0.16→0.05→0.01; on Wikidata
+  0.27→1.00 as recall falls 0.23→0.01. Do **not** describe this as "beats the
+  baseline at matched recall" (false); it is a frontier the baseline lacks.
+- **The advantage is a measurable, ~linear function of graph redundancy.** Average
+  precision (interpolated; area under the best-precision-at-recall≥r frontier)
+  advantage over per-type is **+0.000 on three independent tree datasets**
+  (synthetic, WordNet, `sdag mi=0`), rising monotonically to **+0.07** at
+  redundancy 0.23; the real `wikidata:Q42889:3` slice (redundancy 0.036) sits on
+  that trend at **+0.006**. Redundancy is a property of the *data*, so the knob's
+  power is too — demonstrated by sweeping it. (An independent re-derivation
+  confirmed the monotone ordering and the no-leakage / not-rigged conclusions.)
+
+Honest caveats — this is a precision–**recall trade**, not a free lunch:
+
+1. **No benefit on a tree, and a *cost* at a fixed threshold.** With no redundancy,
+   every `supersetOf` proposal scores corroboration 0, so any θ>0 gates **all** of
+   them out — recall collapses to 0 (a cliff, not a graded curve). The
+   achievable-frontier AP advantage is 0 (corroboration can still match the
+   baseline at θ=0), but at a *fixed* operating θ>0 corroboration on a non-redundant
+   graph refuses all repair and is strictly worse than per-type. The knob is only
+   useful where multiple inheritance exists.
+2. **Precision is bought with recall everywhere off the redundant subgraph.**
+   Corroboration achieves ~0 recall on real tree-region edges (it cannot tell a
+   genuinely-missing tree edge from a fabrication — neither has an alternative
+   route). The headline operating points sit at low recall and small `n_added`
+   (e.g. ~2 edges on Wikidata) — high variance; report counts/CIs, not bare
+   precision.
+3. **A soft prior, not a hard filter.** Rewiring-fabricated edges still receive
+   corroboration > 0 at a measurable rate (≈8.7% on the dense DAG; max fabrication
+   score 0.675, above some operating θ). The gate **reduces but does not eliminate**
+   hallucination.
+4. **The adversary is unconstrained and makes the damaged taxonomy cyclic.**
+   `guidance_rewire_rate` rewires to *any* abstract node regardless of layer,
+   injecting cross-layer/downward `subClassOf` edges and cycles (≈9/10 trials);
+   `nx.descendants` on the cyclic damaged graph can then find spurious routes that
+   "corroborate" a genuinely-false edge. This is the honest worst case (adversary-
+   induced, not a bug); it is rarer on a curated-acyclic ontology. Disclose that
+   corroboration trusts reachability in a possibly-cyclic damaged graph.
+5. **The exact-typed-edge precision oracle overstates semantic error.**
+   `edge_precision`/`hallucination_rate` use exact `(u,v,relation)` identity vs
+   `pristine_edges`; semantically-*true* transitive `supersetOf` shortcuts (where
+   `C ⊑ P` holds in the pristine closure but the exact edge was never present) are
+   counted as hallucinations (on the tree, 14/14 corroborated "fabrications" were
+   true shortcuts). A closure-aware precision is *todo* and would only **improve**
+   corroboration's apparent precision.
+6. **Not rigged (reported as evidence).** Rewiring hits redundant vs tree edges at
+   the dataset base rate (sdag 0.326 base vs 0.317 rewired; Wikidata 0.036 vs
+   0.038), so "corroborated" ≠ "un-rewired by construction"; the per-type baseline
+   is verifiably flat in θ.
+7. **Per-layer attribution.** On the dense DAG most fabrication-corroboration came
+   via the `subClassOf` leg, not the cleaner `supersetOf` "independent witness"
+   (≈248 vs 23). That witness is genuinely independent **only because the E-SO arm
+   removes — never rewires — `supersetOf`**; the framing must be re-checked if a
+   future arm corrupts the extension layer.
+
+**Net reframing.** Per-type conservatism can only *refuse* repair wholesale;
+corroboration makes it *selective* — but only to the degree the graph is
+redundant, a measurable property of the data, not of the method. The contribution
+is thus *when structural repair is trustworthy and what makes conservatism
+selective*, with the redundancy-scaling law (and its tree null) as the evidence.
